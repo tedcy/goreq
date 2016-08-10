@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"log"
 	"net"
 	"net/http"
@@ -32,6 +34,7 @@ type Request struct {
 	Body              interface{}
 	QueryString       interface{}
 	Timeout           time.Duration
+	Multipart         bool
 	ContentType       string
 	Accept            string
 	Host              string
@@ -215,6 +218,67 @@ func paramParseStruct(v *url.Values, query interface{}) error {
 		}
 	}
 	return nil
+}
+
+func structToMap(s interface{}) (map[string]string, error) {
+	m := make(map[string]string)
+
+	val := reflect.ValueOf(s)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return m, fmt.Errorf("Only accepts structs, got %T", val)
+	}
+
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		var v string
+		tag := typ.Field(i).Tag.Get("json")
+
+		f := val.Field(i)
+		switch f.Interface().(type) {
+		case int, int8, int16, int32, int64:
+			v = strconv.FormatInt(f.Int(), 10)
+		case uint, uint8, uint16, uint32, uint64:
+			v = strconv.FormatUint(f.Uint(), 10)
+		case float32:
+			v = strconv.FormatFloat(f.Float(), 'f', -1, 32)
+		case float64:
+			v = strconv.FormatFloat(f.Float(), 'f', -1, 64)
+		case []byte:
+			v = string(f.Bytes())
+		case string:
+			v = f.String()
+		}
+		if v != "" {
+			m[tag] = v
+		}
+	}
+
+	return m, nil
+}
+
+func prepareMultipartUploadBody(b interface{}) (io.Reader, string, error) {
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+
+	params, err := structToMap(b)
+	if err != nil {
+		return nil, "", err
+	}
+
+	for key, val := range params {
+		_ = writer.WriteField(key, val)
+	}
+
+	err = writer.Close()
+	if err != nil {
+		return nil, "", err
+	}
+
+	return body, writer.FormDataContentType(), nil
 }
 
 func prepareRequestBody(b interface{}) (io.Reader, error) {
@@ -420,13 +484,26 @@ func (r Request) addHeaders(headersMap http.Header) {
 }
 
 func (r Request) NewRequest() (*http.Request, error) {
+	var (
+		e error
+		b io.Reader
+		t string
+	)
 
-	b, e := prepareRequestBody(r.Body)
-	if e != nil {
-		// there was a problem marshaling the body
-		return nil, &Error{Err: e}
-	}
-
+	if !r.Multipart {
+		b, e = prepareRequestBody(r.Body)
+		if e != nil {
+			// there was a problem marshaling the body
+			return nil, &Error{Err: e}
+		}
+	} else {
+		b, t, e = prepareMultipartUploadBody(r.Body)
+		if e != nil {
+			// there was a problem marshaling the body
+			return nil, &Error{Err: e}
+		}
+		r.ContentType = t
+    }
 	if r.QueryString != nil {
 		param, e := paramParse(r.QueryString)
 		if e != nil {
