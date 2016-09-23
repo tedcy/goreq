@@ -190,7 +190,7 @@ func paramParseStruct(v *url.Values, query interface{}) error {
 			continue
 		}
 
-		urlTag := typeField.Tag.Get("url")
+		urlTag := typeField.Tag.Get("json")
 		if urlTag == "-" {
 			continue
 		}
