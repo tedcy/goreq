@@ -330,7 +330,6 @@ func SetResponseHeaderTimeout(duration time.Duration) {
 
 func SetConnectReadWriteTimeout(cduration, rwduration time.Duration) {
 	DefaultTransport.(*http.Transport).Dial = func(netw, addr string) (net.Conn, error) {
-		fmt.Println("do dial")
 		c, err := net.DialTimeout(netw, addr, cduration)
 		if err != nil {
 			return nil, err
@@ -393,7 +392,7 @@ func (r Request) Do() (*Response, error) {
 	var transport = DefaultTransport
 	var resUri string
 	var redirectFailed bool
-
+	
 	r.Method = valueOrDefault(r.Method, "GET")
 
 	// use a client with a cookie jar if necessary. We create a new client not
@@ -464,7 +463,7 @@ func (r Request) Do() (*Response, error) {
 	}
 
 	timeout := false
-	if r.Timeout > 0 {
+	if r.Timeout >= 0 {
 		client.Timeout = r.Timeout
 	}
 
