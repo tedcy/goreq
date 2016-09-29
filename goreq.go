@@ -324,6 +324,48 @@ func SetConnectTimeout(duration time.Duration) {
 	DefaultDialer.Timeout = duration
 }
 
+func SetResponseHeaderTimeout(duration time.Duration) {
+	DefaultTransport.(*http.Transport).ResponseHeaderTimeout = duration
+}
+
+func SetConnectReadWriteTimeout(cduration, rwduration time.Duration) {
+	DefaultTransport.(*http.Transport).Dial = func(netw, addr string) (net.Conn, error) {
+		fmt.Println("do dial")
+		c, err := net.DialTimeout(netw, addr, cduration)
+		if err != nil {
+			return nil, err
+        }
+		if rwduration > 0 {
+			return &rwTimeoutConn{
+				TCPConn:	c.(*net.TCPConn),
+				rwTimeout:	rwduration,
+            }, nil
+        }
+		return c, nil
+    }
+}
+
+type rwTimeoutConn struct {
+	*net.TCPConn
+	rwTimeout time.Duration
+}
+
+func (this *rwTimeoutConn) Read(b []byte)(int, error) {
+	err := this.TCPConn.SetDeadline(time.Now().Add(this.rwTimeout))
+	if err != nil {
+		return 0,err
+    }
+	return this.TCPConn.Read(b)
+}
+
+func (this *rwTimeoutConn) Write(b []byte)(int, error) {
+	err := this.TCPConn.SetDeadline(time.Now().Add(this.rwTimeout))
+	if err != nil {
+		return 0,err
+    }
+	return this.TCPConn.Write(b)
+}
+
 func (r *Request) AddHeader(name string, value string) {
 	if r.headers == nil {
 		r.headers = []headerTuple{}
