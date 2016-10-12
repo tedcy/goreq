@@ -745,20 +745,9 @@ func TestRequest(t *testing.T) {
 		g.Describe("Timeouts", func() {
 
 			g.Describe("Connection timeouts", func() {
-				g.It("Should connect timeout after a default of 1000 ms", func() {
-					start := time.Now()
-					res, err := Request{Uri: "http://10.255.255.1"}.Do()
-					elapsed := time.Since(start)
-
-					Expect(elapsed).Should(BeNumerically("<", 1100*time.Millisecond))
-					Expect(elapsed).Should(BeNumerically(">=", 1000*time.Millisecond))
-					Expect(res).Should(BeNil())
-					Expect(err.(*Error).Timeout()).Should(BeTrue())
-				})
 				g.It("Should connect timeout after a custom amount of time", func() {
-					SetConnectTimeout(100 * time.Millisecond)
 					start := time.Now()
-					res, err := Request{Uri: "http://10.255.255.1"}.Do()
+					res, err := Request{Uri: "http://10.255.255.1", ConnectTimeout: 100 * time.Millisecond}.Do()
 					elapsed := time.Since(start)
 
 					Expect(elapsed).Should(BeNumerically("<", 150*time.Millisecond))
@@ -767,11 +756,11 @@ func TestRequest(t *testing.T) {
 					Expect(err.(*Error).Timeout()).Should(BeTrue())
 				})
 				g.It("Should connect timeout after a custom amount of time even with method set", func() {
-					SetConnectTimeout(100 * time.Millisecond)
 					start := time.Now()
 					request := Request{
 						Uri:    "http://10.255.255.1",
 						Method: "GET",
+						ConnectTimeout:	100 * time.Millisecond,
 					}
 					res, err := request.Do()
 					elapsed := time.Since(start)
@@ -782,6 +771,32 @@ func TestRequest(t *testing.T) {
 					Expect(err.(*Error).Timeout()).Should(BeTrue())
 				})
 			})
+
+			g.Describe("RW timeout", func() {
+				var ts *httptest.Server
+				stop := make(chan bool)
+
+				g.Before(func() {
+					ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						<-stop
+						// just wait for someone to tell you when to end the request. this is used to simulate a slow server
+					}))
+				})
+				g.After(func() {
+					stop <- true
+					ts.Close()
+				})
+				g.It("Should read or write timeout after a custom amount of time", func() {
+					start := time.Now()
+					res, err := Request{Uri: ts.URL, RWTimeout: 500 * time.Millisecond}.Do()
+					elapsed := time.Since(start)
+
+					Expect(elapsed).Should(BeNumerically("<", 550*time.Millisecond))
+					Expect(elapsed).Should(BeNumerically(">=", 500*time.Millisecond))
+					Expect(res).Should(BeNil())
+					Expect(err.(*Error).Timeout()).Should(BeTrue())
+                })
+            })
 
 			g.Describe("Request timeout", func() {
 				var ts *httptest.Server
@@ -798,8 +813,6 @@ func TestRequest(t *testing.T) {
 					ts.Close()
 				})
 				g.It("Should request timeout after a custom amount of time", func() {
-					SetConnectTimeout(1000 * time.Millisecond)
-
 					start := time.Now()
 					res, err := Request{Uri: ts.URL, Timeout: 500 * time.Millisecond}.Do()
 					elapsed := time.Since(start)
@@ -814,7 +827,6 @@ func TestRequest(t *testing.T) {
 						time.Sleep(2000 * time.Millisecond)
 						w.WriteHeader(200)
 					}))
-					SetConnectTimeout(1000 * time.Millisecond)
 					start := time.Now()
 					request := Request{
 						Uri:     ts.URL,
@@ -910,30 +922,9 @@ func TestRequest(t *testing.T) {
 				}
 				res, _ := req.Do()
 
-				Expect(DefaultClient.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify).Should(Equal(true))
 				Expect(res.StatusCode).Should(Equal(200))
 			})
-			g.It("Should work if a different transport is specified", func() {
-				ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(200)
-				}))
-				defer ts.Close()
-				var currentTransport = DefaultTransport
-				DefaultTransport = &http.Transport{Dial: DefaultDialer.Dial}
 
-				req := Request{
-					Insecure: true,
-					Uri:      ts.URL,
-					Host:     "foobar.com",
-				}
-				res, _ := req.Do()
-
-				Expect(DefaultClient.Transport.(*http.Transport).TLSClientConfig.InsecureSkipVerify).Should(Equal(true))
-				Expect(res.StatusCode).Should(Equal(200))
-
-				DefaultTransport = currentTransport
-
-			})
 			g.It("GetRequest should return the underlying httpRequest ", func() {
 				req := Request{
 					Host: "foobar.com",
@@ -1123,15 +1114,15 @@ func Test_paramParse(t *testing.T) {
 	}
 
 	type AnnotedForm struct {
-		Foo  string `url:"foo_bar"`
-		Baz  string `url:"bad,omitempty"`
-		Norf string `url:"norf,omitempty"`
-		Qux  string `url:"-"`
+		Foo  string `json:"foo_bar"`
+		Baz  string `json:"bad,omitempty"`
+		Norf string `json:"norf,omitempty"`
+		Qux  string `json:"-"`
 	}
 
 	type EmbedForm struct {
-		AnnotedForm `url:",squash"`
-		Form        `url:",squash"`
+		AnnotedForm `json:",squash"`
+		Form        `json:",squash"`
 		Corge       string `url:"corge"`
 	}
 

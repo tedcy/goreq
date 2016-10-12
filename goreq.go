@@ -9,16 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"io"
 	"io/ioutil"
-	"mime/multipart"
 	"log"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,29 +26,33 @@ import (
 type itimeout interface {
 	Timeout() bool
 }
+
 type Request struct {
-	headers           []headerTuple
-	cookies           []*http.Cookie
-	Method            string
-	Uri               string
-	Body              interface{}
-	QueryString       interface{}
-	Timeout           time.Duration
-	Multipart         bool
-	ContentType       string
-	Accept            string
-	Host              string
-	UserAgent         string
-	Insecure          bool
-	MaxRedirects      int
-	RedirectHeaders   bool
-	Proxy             string
-	Compression       *compression
-	BasicAuthUsername string
-	BasicAuthPassword string
-	CookieJar         http.CookieJar
-	ShowDebug         bool
-	OnBeforeRequest   func(goreq *Request, httpreq *http.Request)
+	headers               []headerTuple
+	cookies               []*http.Cookie
+	Method                string
+	Uri                   string
+	Timeout               time.Duration
+	ConnectTimeout        time.Duration
+	RWTimeout             time.Duration
+	ResponseHeaderTimeout time.Duration
+	Body                  interface{}
+	QueryString           interface{}
+	Multipart             bool
+	ContentType           string
+	Accept                string
+	Host                  string
+	UserAgent             string
+	Insecure              bool
+	MaxRedirects          int
+	RedirectHeaders       bool
+	Proxy                 string
+	Compression           *compression
+	BasicAuthUsername     string
+	BasicAuthPassword     string
+	CookieJar             http.CookieJar
+	ShowDebug             bool
+	OnBeforeRequest       func(goreq *Request, httpreq *http.Request)
 }
 
 type compression struct {
@@ -62,17 +66,11 @@ type Response struct {
 	Uri  string
 	Body *Body
 	req  *http.Request
+	tp	 *http.Transport
 }
 
 func (r Response) CancelRequest() {
-	cancelRequest(DefaultTransport, r.req)
-
-}
-
-func cancelRequest(transport interface{}, r *http.Request) {
-	if tp, ok := transport.(transportRequestCanceler); ok {
-		tp.CancelRequest(r)
-	}
+	r.tp.CancelRequest(r.req)
 }
 
 type headerTuple struct {
@@ -88,10 +86,6 @@ type Body struct {
 type Error struct {
 	timeout bool
 	Err     error
-}
-
-type transportRequestCanceler interface {
-	CancelRequest(*http.Request)
 }
 
 func (e *Error) Timeout() bool {
@@ -273,13 +267,13 @@ func prepareMultipartUploadBody(b interface{}) (io.Reader, string, error) {
 	for key, val := range params {
 		if key != "file_content" {
 			_ = writer.WriteField(key, val)
-        }else {
+		} else {
 			p, err := writer.CreateFormFile(key, "nouse")
 			if err != nil {
 				continue
-            }
-			_,_ = p.Write([]byte(val))
-        }
+			}
+			_, _ = p.Write([]byte(val))
+		}
 	}
 
 	err = writer.Close()
@@ -313,55 +307,24 @@ func prepareRequestBody(b interface{}) (io.Reader, error) {
 	}
 }
 
-var DefaultDialer = &net.Dialer{Timeout: 1000 * time.Millisecond}
-var DefaultTransport http.RoundTripper = &http.Transport{Dial: DefaultDialer.Dial, Proxy: http.ProxyFromEnvironment}
-var DefaultClient = &http.Client{Transport: DefaultTransport}
-
-var proxyTransport http.RoundTripper
-var proxyClient *http.Client
-
-func SetConnectTimeout(duration time.Duration) {
-	DefaultDialer.Timeout = duration
-}
-
-func SetResponseHeaderTimeout(duration time.Duration) {
-	DefaultTransport.(*http.Transport).ResponseHeaderTimeout = duration
-}
-
-func SetConnectReadWriteTimeout(cduration, rwduration time.Duration) {
-	DefaultTransport.(*http.Transport).Dial = func(netw, addr string) (net.Conn, error) {
-		c, err := net.DialTimeout(netw, addr, cduration)
-		if err != nil {
-			return nil, err
-        }
-		if rwduration > 0 {
-			return &rwTimeoutConn{
-				TCPConn:	c.(*net.TCPConn),
-				rwTimeout:	rwduration,
-            }, nil
-        }
-		return c, nil
-    }
-}
-
 type rwTimeoutConn struct {
 	*net.TCPConn
 	rwTimeout time.Duration
 }
 
-func (this *rwTimeoutConn) Read(b []byte)(int, error) {
+func (this *rwTimeoutConn) Read(b []byte) (int, error) {
 	err := this.TCPConn.SetDeadline(time.Now().Add(this.rwTimeout))
 	if err != nil {
-		return 0,err
-    }
+		return 0, err
+	}
 	return this.TCPConn.Read(b)
 }
 
-func (this *rwTimeoutConn) Write(b []byte)(int, error) {
+func (this *rwTimeoutConn) Write(b []byte) (int, error) {
 	err := this.TCPConn.SetDeadline(time.Now().Add(this.rwTimeout))
 	if err != nil {
-		return 0,err
-    }
+		return 0, err
+	}
 	return this.TCPConn.Write(b)
 }
 
@@ -388,39 +351,46 @@ func (r Request) WithCookie(c *http.Cookie) Request {
 }
 
 func (r Request) Do() (*Response, error) {
-	var client = DefaultClient
-	var transport = DefaultTransport
+	var client *http.Client
+	var transport *http.Transport
 	var resUri string
 	var redirectFailed bool
-	
+
 	r.Method = valueOrDefault(r.Method, "GET")
 
-	// use a client with a cookie jar if necessary. We create a new client not
-	// to modify the default one.
-	if r.CookieJar != nil {
-		client = &http.Client{
-			Transport: transport,
-			Jar:       r.CookieJar,
-		}
+	transport = &http.Transport{
+		Dial:  func(netw, addr string) (net.Conn, error) {
+			conn, err := net.DialTimeout(netw, addr, r.ConnectTimeout)	
+			if err != nil {
+				return nil, err
+            }
+			if r.RWTimeout > 0 {
+				return &rwTimeoutConn{
+					TCPConn:   conn.(*net.TCPConn),
+					rwTimeout: r.RWTimeout,
+				}, nil
+			}else {
+				return conn, nil
+            }
+		},
+		ResponseHeaderTimeout:	r.ResponseHeaderTimeout,
+		MaxIdleConnsPerHost:	2000,
 	}
-
 	if r.Proxy != "" {
 		proxyUrl, err := url.Parse(r.Proxy)
 		if err != nil {
 			// proxy address is in a wrong format
 			return nil, &Error{Err: err}
 		}
+		transport.Proxy = http.ProxyURL(proxyUrl)
+	}else {
+		transport.Proxy = http.ProxyFromEnvironment
+    }
 
-		//If jar is specified new client needs to be built
-		if proxyTransport == nil || client.Jar != nil {
-			proxyTransport = &http.Transport{Dial: DefaultDialer.Dial, Proxy: http.ProxyURL(proxyUrl)}
-			proxyClient = &http.Client{Transport: proxyTransport, Jar: client.Jar}
-		} else if proxyTransport, ok := proxyTransport.(*http.Transport); ok {
-			proxyTransport.Proxy = http.ProxyURL(proxyUrl)
-		}
-		transport = proxyTransport
-		client = proxyClient
-	}
+	client = &http.Client{
+		Transport: transport,
+		Jar:	   r.CookieJar,
+    }
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 
@@ -441,18 +411,16 @@ func (r Request) Do() (*Response, error) {
 		return nil
 	}
 
-	if transport, ok := transport.(*http.Transport); ok {
-		if r.Insecure {
-			if transport.TLSClientConfig != nil {
-				transport.TLSClientConfig.InsecureSkipVerify = true
-			} else {
-				transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-			}
-		} else if transport.TLSClientConfig != nil {
-			// the default TLS client (when transport.TLSClientConfig==nil) is
-			// already set to verify, so do nothing in that case
-			transport.TLSClientConfig.InsecureSkipVerify = false
+	if r.Insecure {
+		if transport.TLSClientConfig != nil {
+			transport.TLSClientConfig.InsecureSkipVerify = true
+		} else {
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		}
+	} else if transport.TLSClientConfig != nil {
+		// the default TLS client (when transport.TLSClientConfig==nil) is
+		// already set to verify, so do nothing in that case
+		transport.TLSClientConfig.InsecureSkipVerify = false
 	}
 
 	req, err := r.NewRequest()
@@ -496,9 +464,9 @@ func (r Request) Do() (*Response, error) {
 		//If redirect fails we still want to return response data
 		if redirectFailed {
 			if res != nil {
-				response = &Response{res, resUri, &Body{reader: res.Body}, req}
+				response = &Response{res, resUri, &Body{reader: res.Body}, req, transport}
 			} else {
-				response = &Response{res, resUri, nil, req}
+				response = &Response{res, resUri, nil, req, transport}
 			}
 		}
 
@@ -515,10 +483,10 @@ func (r Request) Do() (*Response, error) {
 		if err != nil {
 			return nil, &Error{Err: err}
 		}
-		return &Response{res, resUri, &Body{reader: res.Body, compressedReader: compressedReader}, req}, nil
+		return &Response{res, resUri, &Body{reader: res.Body, compressedReader: compressedReader}, req, transport}, nil
 	}
 
-	return &Response{res, resUri, &Body{reader: res.Body}, req}, nil
+	return &Response{res, resUri, &Body{reader: res.Body}, req, transport}, nil
 }
 
 func (r Request) addHeaders(headersMap http.Header) {
@@ -553,7 +521,7 @@ func (r Request) NewRequest() (*http.Request, error) {
 			return nil, &Error{Err: e}
 		}
 		r.ContentType = t
-    }
+	}
 	if r.QueryString != nil {
 		param, e := paramParse(r.QueryString)
 		if e != nil {
