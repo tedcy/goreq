@@ -758,9 +758,9 @@ func TestRequest(t *testing.T) {
 				g.It("Should connect timeout after a custom amount of time even with method set", func() {
 					start := time.Now()
 					request := Request{
-						Uri:    "http://10.255.255.1",
-						Method: "GET",
-						ConnectTimeout:	100 * time.Millisecond,
+						Uri:            "http://10.255.255.1",
+						Method:         "GET",
+						ConnectTimeout: 100 * time.Millisecond,
 					}
 					res, err := request.Do()
 					elapsed := time.Since(start)
@@ -795,8 +795,8 @@ func TestRequest(t *testing.T) {
 					Expect(elapsed).Should(BeNumerically(">=", 500*time.Millisecond))
 					Expect(res).Should(BeNil())
 					Expect(err.(*Error).Timeout()).Should(BeTrue())
-                })
-            })
+				})
+			})
 
 			g.Describe("Request timeout", func() {
 				var ts *httptest.Server

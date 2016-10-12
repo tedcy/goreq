@@ -66,7 +66,7 @@ type Response struct {
 	Uri  string
 	Body *Body
 	req  *http.Request
-	tp	 *http.Transport
+	tp   *http.Transport
 }
 
 func (r Response) CancelRequest() {
@@ -359,22 +359,22 @@ func (r Request) Do() (*Response, error) {
 	r.Method = valueOrDefault(r.Method, "GET")
 
 	transport = &http.Transport{
-		Dial:  func(netw, addr string) (net.Conn, error) {
-			conn, err := net.DialTimeout(netw, addr, r.ConnectTimeout)	
+		Dial: func(netw, addr string) (net.Conn, error) {
+			conn, err := net.DialTimeout(netw, addr, r.ConnectTimeout)
 			if err != nil {
 				return nil, err
-            }
+			}
 			if r.RWTimeout > 0 {
 				return &rwTimeoutConn{
 					TCPConn:   conn.(*net.TCPConn),
 					rwTimeout: r.RWTimeout,
 				}, nil
-			}else {
+			} else {
 				return conn, nil
-            }
+			}
 		},
-		ResponseHeaderTimeout:	r.ResponseHeaderTimeout,
-		MaxIdleConnsPerHost:	2000,
+		ResponseHeaderTimeout: r.ResponseHeaderTimeout,
+		MaxIdleConnsPerHost:   2000,
 	}
 	if r.Proxy != "" {
 		proxyUrl, err := url.Parse(r.Proxy)
@@ -383,14 +383,14 @@ func (r Request) Do() (*Response, error) {
 			return nil, &Error{Err: err}
 		}
 		transport.Proxy = http.ProxyURL(proxyUrl)
-	}else {
+	} else {
 		transport.Proxy = http.ProxyFromEnvironment
-    }
+	}
 
 	client = &http.Client{
 		Transport: transport,
-		Jar:	   r.CookieJar,
-    }
+		Jar:       r.CookieJar,
+	}
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 
