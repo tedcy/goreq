@@ -214,8 +214,9 @@ func paramParseStruct(v *url.Values, query interface{}) error {
 	return nil
 }
 
-func structToMap(s interface{}) (map[string]string, error) {
-	m := make(map[string]string)
+//fileContent should be at last,so to Slice rather then Map is better
+func structToSlice(s interface{}) ([][2]string, error) {
+	var m [][2]string
 
 	val := reflect.ValueOf(s)
 	if val.Kind() == reflect.Ptr {
@@ -247,7 +248,8 @@ func structToMap(s interface{}) (map[string]string, error) {
 			v = f.String()
 		}
 		if v != "" {
-			m[tag] = v
+			ss := [2]string{tag,v}
+			m = append(m, ss)
 		}
 	}
 
@@ -258,13 +260,15 @@ func prepareMultipartUploadBody(b interface{}) (io.Reader, string, error) {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 
-	params, err := structToMap(b)
+	params, err := structToSlice(b)
 	if err != nil {
 		return nil, "", err
 	}
 
 	//这里fileContent字段的值会用CreateFormFile，另外这里吃掉了错误
-	for key, val := range params {
+	for _, ss := range params {
+		key := ss[0]
+		val := ss[1]
 		if key != "fileContent" {
 			_ = writer.WriteField(key, val)
 		} else {
