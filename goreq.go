@@ -263,9 +263,9 @@ func prepareMultipartUploadBody(b interface{}) (io.Reader, string, error) {
 		return nil, "", err
 	}
 
-	//这里file_content字段的值会用CreateFormFile，另外这里吃掉了错误
+	//这里fileContent字段的值会用CreateFormFile，另外这里吃掉了错误
 	for key, val := range params {
-		if key != "file_content" {
+		if key != "fileContent" {
 			_ = writer.WriteField(key, val)
 		} else {
 			p, err := writer.CreateFormFile(key, "nouse")
