@@ -247,10 +247,8 @@ func structToSlice(s interface{}) ([][2]string, error) {
 		case string:
 			v = f.String()
 		}
-		if v != "" {
-			ss := [2]string{tag,v}
-			m = append(m, ss)
-		}
+		ss := [2]string{tag,v}
+		m = append(m, ss)
 	}
 
 	return m, nil
