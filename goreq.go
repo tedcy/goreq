@@ -69,8 +69,13 @@ type Response struct {
 	tp   *http.Transport
 }
 
-func (r Response) CancelRequest() {
+func (r *Response) CancelRequest() {
 	r.tp.CancelRequest(r.req)
+}
+
+func (r *Response) Close() {
+	r.Body.Close()
+	r.tp.CloseIdleConnections()
 }
 
 type headerTuple struct {
