@@ -75,7 +75,7 @@ func (r *Response) CancelRequest() {
 
 func (r *Response) Close() {
 	r.Body.Close()
-	r.tp.CloseIdleConnections()
+	//r.tp.CloseIdleConnections()
 }
 
 type headerTuple struct {
