@@ -357,6 +357,8 @@ func (r Request) WithCookie(c *http.Cookie) Request {
 
 }
 
+var DefaultTransport *http.Transport = &http.Transport{MaxIdleConnsPerHost: 2000}
+
 func (r Request) Do() (*Response, error) {
 	var client *http.Client
 	var transport *http.Transport
@@ -365,24 +367,23 @@ func (r Request) Do() (*Response, error) {
 
 	r.Method = valueOrDefault(r.Method, "GET")
 
-	transport = &http.Transport{
-		Dial: func(netw, addr string) (net.Conn, error) {
-			conn, err := net.DialTimeout(netw, addr, r.ConnectTimeout)
-			if err != nil {
-				return nil, err
-			}
-			if r.RWTimeout > 0 {
-				return &rwTimeoutConn{
-					TCPConn:   conn.(*net.TCPConn),
-					rwTimeout: r.RWTimeout,
-				}, nil
-			} else {
-				return conn, nil
-			}
-		},
-		ResponseHeaderTimeout: r.ResponseHeaderTimeout,
-		MaxIdleConnsPerHost:   2000,
+	transport = DefaultTransport
+	Dial := func(netw, addr string) (net.Conn, error) {
+		conn, err := net.DialTimeout(netw, addr, r.ConnectTimeout)
+		if err != nil {
+			return nil, err
+		}
+		if r.RWTimeout > 0 {
+			return &rwTimeoutConn{
+				TCPConn:   conn.(*net.TCPConn),
+				rwTimeout: r.RWTimeout,
+			}, nil
+		} else {
+			return conn, nil
+		}
 	}
+	transport.Dial = Dial
+	transport.ResponseHeaderTimeout = r.ResponseHeaderTimeout
 	if r.Proxy != "" {
 		proxyUrl, err := url.Parse(r.Proxy)
 		if err != nil {
